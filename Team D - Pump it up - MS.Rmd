@@ -14,13 +14,18 @@ output: html_notebook
 
 # 1. Introduction and data preparation
 
-Ensure propper formatting of the data
-Treat missing data
-
+Read and map csv files to single data frame
 
 ```{r}
-test
+
+df_labels <- read.csv("internal-training-labels.csv")
+df_values <- read.csv("internal-training-values.csv")
+df <- merge(df_labels,df_values, by = "id")
+rm(df_labels)
+rm(df_values)
+
 ```
+
 
 # 2. Evaluation
 
