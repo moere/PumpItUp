@@ -16,24 +16,41 @@ output: html_notebook
 
 Read and map csv files to single data frame
 
-```{r}
+```{r Setup}
 
-df_labels <- read.csv("internal-training-labels.csv")
-df_values <- read.csv("internal-training-values.csv")
-df <- merge(df_labels,df_values, by = "id")
-rm(df_labels)
-rm(df_values)
+df_labels <- read.csv("internal-training-labels.csv") # Read Labels file
+df_values <- read.csv("internal-training-values.csv") # Read Values file
+df <- merge(df_labels,df_values, by = "id") # Merge both files on 'ID'
+rm(df_labels) # remove not used data frame
+rm(df_values) # remove not used data frame
+
+# first look at the data and it's structure
+summary(df) 
+str(df)
 
 ```
 
+There are various variables that miss a significant amount of fields. Here we handle this part.
+
+```{r}
+
+#population '0' values
+
+#num_private '0' values
+
+#latitude, longitude, height: check '0' values
+
+```
 
 # 2. Evaluation
 
-Build CV loop
-Build Evaluation function
+Build Evaluation function that computes the accuracy rate of a model
 
+Build CV function that splits the data set into k-folds for cross validation
 
 ```{r}
+
+
 
 ```
 
