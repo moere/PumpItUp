@@ -19,7 +19,7 @@ Treat missing data
 
 
 ```{r}
-Git Test
+Git Test Test
 ```
 
 Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
