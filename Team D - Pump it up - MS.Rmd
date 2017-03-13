@@ -1,6 +1,8 @@
 ---
-title: "R Notebook"
-output: html_notebook
+title: "Machine Learning II - MBD16 - Competition"
+output:
+  html_document: default
+  html_notebook: default
 ---
 
 #Table of content
@@ -16,7 +18,7 @@ output: html_notebook
 
 Read and map csv files to single data frame
 
-```{r Setup}
+```{r Setup, message = FALSE, eval=FALSE}
 
 df_labels <- read.csv("internal-training-labels.csv") # Read Labels file
 df_values <- read.csv("internal-training-values.csv") # Read Values file
@@ -30,7 +32,7 @@ str(df)
 
 ```
 
-There are various variables that miss a significant amount of fields. Here we handle this part.
+It can be observed, that there are various variables that miss a significant amount of fields. Here we handle this part.
 
 ```{r}
 
