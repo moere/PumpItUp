@@ -5,24 +5,66 @@ output: html_notebook
 
 #Table of content
 
-1) Introduction and data preparation
-2) Evaluation
-3) Feature Engineering
-4) Feature Selection
-5) Model Selection
-6) Evaluating Models
+1. Introduction and data preparation
+2. Evaluation
+3. Feature Engineering
+4. Feature Selection
+5. Model Selection
+6. Evaluating Models
 
-#Introduction and data preparation
+# 1. Introduction and data preparation
 
 Ensure propper formatting of the data
 Treat missing data
 
 
 ```{r}
-Git Test Test
+
 ```
 
-Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
+# 2. Evaluation
 
-When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file).
+Build CV loop
+Build Evaluation function
+
+
+```{r}
+
+```
+
+# 3. Feature Engineering
+
+Build extra features
+continuous to levels
+
+https://github.com/drivendataorg/pump-it-up/blob/master/madRid/PumpItUp_DataDriven_2nd_place_madRid_team.R
+
+
+```{r}
+
+```
+
+# 4. Feature Selection
+
+Build feature selection part
+
+```{r}
+
+```
+
+# 5. Model Selection
+
+Build modeling or model selection part
+
+```{r}
+
+```
+
+# 6. Model Evaluation
+
+Store models and evaluations
+
+```{r}
+
+```
 
