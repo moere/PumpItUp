@@ -20,7 +20,7 @@ Read and map csv files to single data frame
 
 ```{r Setup, message = FALSE, eval=FALSE}
 
-GitTestTest
+GitTestTestfinal
 
 df_labels <- read.csv("internal-training-labels.csv") # Read Labels file
 df_values <- read.csv("internal-training-values.csv") # Read Values file
