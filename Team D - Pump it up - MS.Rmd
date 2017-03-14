@@ -20,7 +20,7 @@ Read and map csv files to single data frame
 
 ```{r Setup, message = FALSE, eval=FALSE}
 
-GitTest
+GitTestTestfinals
 
 Test Mauri
 
