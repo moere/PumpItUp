@@ -20,6 +20,8 @@ Read and map csv files to single data frame
 
 ```{r Setup, message = FALSE, eval=FALSE}
 
+GitTest
+
 df_labels <- read.csv("internal-training-labels.csv") # Read Labels file
 df_values <- read.csv("internal-training-values.csv") # Read Values file
 df <- merge(df_labels,df_values, by = "id") # Merge both files on 'ID'
