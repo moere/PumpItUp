@@ -16,13 +16,13 @@ output:
 
 # 1. Introduction and data preparation
 
+```{r message=FALSE}
+library(randomForest)
+```
+
 Read and map csv files to single data frame
 
 ```{r Setup, message = FALSE, eval=FALSE}
-
-GitTestTestfinals
-
-Test Mauri
 
 df_labels <- read.csv("internal-training-labels.csv") # Read Labels file
 df_values <- read.csv("internal-training-values.csv") # Read Values file
@@ -56,7 +56,28 @@ Build CV function that splits the data set into k-folds for cross validation
 
 ```{r}
 
+splitdf <- function(dataframe, seed=NULL, percentage=0.8) {
+  if (!is.null(seed)) {
+    set.seed(seed)
+    }
+  index <- 1:nrow(dataframe)
+  numTrainingSamples <- round(length(index) * percentage)
+  trainindex <- sample(index, numTrainingSamples)
+  trainset <- dataframe[trainindex, ]
+  testset <- dataframe[-trainindex, ]
+  list(trainset=trainset,testset=testset)
+}
 
+evaluation <- function(model, split){
+  model <- tree(status_group~., data = split$trainset, family = "binomial")
+  probs <- predict(model, type="response", newdata = split$testset)
+  predictions <- data.frame(Survived = split$testset$Survived, pred=probs)
+  myROC <- roc(Survived ~ probs, predictions)
+  optimalThreshold <- coords(myROC, "best", ret = "threshold")
+  T <- table(predictions$Survived, predictions$pred > optimalThreshold)
+  F1 <- (2*(T[1,1]))/((2*(T[1,1]))+T[2,1]+T[1,2])
+  F1
+}
 
 ```
 
@@ -78,21 +99,31 @@ Build feature selection part
 
 ```{r}
 
+featureselection <- function(df, split){
+  highmcorr <- findCorrelation(cor(df[,1:length(df)-1]), cutoff = 0.8)
+  split$trainset <- split$trainset[,-highmcorr-1]
+  split$testset <- split$testset[,-highmcorr-1]
+}
+
 ```
 
-# 5. Model Selection
+# 5. Modeling Section
 
 Build modeling or model selection part
 
 ```{r}
+df1 <- lapply(df, ifelse(is.integer()))
+model1 <- randomForest(status_group ~ ., data = df, importance = TRUE, proximity = TRUE)
 
 ```
 
-# 6. Model Evaluation
+# 6. Model Evaluation and Model Selection
 
 Store models and evaluations
 
 ```{r}
+
+
 
 ```
 
