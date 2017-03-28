@@ -1,0 +1,361 @@
+---
+title: "Machine Learning II - Group D - MBD16 - Competition"
+output:
+  html_document: default
+  code_folding: show
+  html_notebook: default
+  pdf_document: default
+---
+
+#Instructions
+
+Calling below function after running the RMD file will output a Data Frame with the 'id' variable and the prediction for 'status_group' including a header for the test dataset that lays on the filepath.
+
+`evaluate('filepath')`
+
+
+#Table of content
+
+1. Data Exploration
+2. Feature Engineering
+3. Feature Selection
+4. Model Selection
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+
+#install.packages("ggmap", type = "source")
+library(data.table) # Data reading
+library(mice) # imputing
+library(plyr) # Data manipulation
+library(dplyr) # Data manipulation
+library(ggplot2) # Data visualization
+library(caTools) # Split dataset
+library(randomForest) # Modeling
+library(caret) # Confusion matrix
+library(maps) # Location visualization
+library(mapdata) # Location visualization
+library(ggmap) # Location visualization
+
+```
+
+```{r Setup, message=FALSE, warning=FALSE, include=FALSE}
+
+wp_values <- fread("internal-training-values.csv",na.strings = '',stringsAsFactors = T) # Read Values file
+wp_labels <- fread("internal-training-labels.csv",na.strings = '',stringsAsFactors = T) # Read Label file
+waterPump <- tbl_df(merge(wp_values,wp_labels)) # Merge both files on 'ID'
+rm(wp_labels) # remove not used data frame
+rm(wp_values) # remove not used data frame
+
+
+# Removing NAs from dataset
+finalWP <- waterPump[complete.cases(waterPump),]
+attach(finalWP)
+attach(waterPump)
+
+```
+
+# 1. Data Exploration
+
+Before starting engineering the features, the dataset is explored by plotting relevant features.
+
+```{r warning=FALSE, echo=FALSE, comment=FALSE, message=FALSE}
+
+# Distribution of classes to be predicted
+table(status_group)
+prop.table(table(status_group))
+
+# Visualization of data
+qplot(quantity, data=waterPump, geom="bar", fill=status_group) + 
+  theme(legend.position = "right")
+qplot(status_group, data=waterPump, geom="bar", fill=quantity) + 
+  theme(legend.position = "right")
+
+qplot(quality_group, data=waterPump, geom="bar", fill=status_group) + 
+  theme(legend.position = "right")
+
+qplot(waterpoint_type, data=waterPump, geom="bar", fill=status_group) + 
+  theme(legend.position = "right") + 
+  theme(axis.text.x=element_text(angle = -20, hjust = 0))
+
+ggplot(subset(waterPump, construction_year > 0), aes(x =construction_year)) +
+  geom_histogram(bins = 20) + 
+  facet_grid( ~ status_group)
+
+# Visually mapping location data
+
+Tanzania <- get_map("Tanzania", source = "google")
+Tanzania <- get_map(location = c(longitude = 35, latitude = -7), zoom = 6)
+bc = data.frame(waterPump$latitude, waterPump$longitude)
+ggmap(Tanzania) + 
+  geom_point(data = bc, mapping = aes(x = waterPump.longitude, y = waterPump.latitude, color = status_group)) + labs(x = 'longitude', y = 'latitude')
+
+```
+
+Above visualizations help choose relevant features that are possible strong predictors.
+
+The value 'dry' of the 'quality' variable seems to isolate non functional waterpumps. Similarly, functional pumps tend to have a 'enough' value. This makes the 'quality' feature a possible strong predictor. 
+
+# 2. Feature Engineering
+
+An additional feature which represents the number of days since the data was obtained, is created.
+
+Unrealistic, impossible and 'NA' values are imputed using mice and random forest.
+
+Reducing factor levels for categorical variables 'installer' and 'funder'. Same values with different name variations are combined to a single level. Rare levels are combined into a single level 'Others'.
+
+
+```{r, message=FALSE, warning=FALSE, comment=FALSE}
+
+# Converting date to datetime class
+finalWP$date_recorded <- as.Date(finalWP$date_recorded)
+
+# Creating new feature from recorded date
+finalWP$days_since_last_recorded <- max(finalWP$date_recorded)-finalWP$date_recorded
+finalWP$days_since_last_recorded <- as.integer(finalWP$days_since_last_recorded)
+
+# Selecting features with missing values for imputation
+impWP <- select(finalWP,id,population,construction_year)
+impWP$population[impWP$population == 0] <- NA
+impWP$construction_year[impWP$construction_year == 0]<- NA
+
+# Performing mice imputation, based on random forests
+# miceMod <- mice(impWP[, !names(impWP) %in% "id"], method="rf")
+```
+
+```{r, message=FALSE, warning=FALSE, comment=FALSE, include=FALSE}
+miceMod <- mice(impWP[, !names(impWP) %in% "id"], method="rf")
+```
+
+```{r, message=FALSE, warning=FALSE, comment=FALSE}
+# Generating the completed data
+miceOutput <- complete(miceMod)
+
+# Adding imputed values to dataset
+finalWP <- select(finalWP,-c(population,construction_year))
+finalWP <- cbind(finalWP,miceOutput)
+
+# Converting funder & installer to lowercase
+finalWP$funder <- as.character(finalWP$funder)
+finalWP$installer <- as.character(finalWP$installer)
+chr.cols = finalWP %>% summarise_each(funs(is.character(.))) %>% unlist() %>% which() %>% names()
+finalWP = finalWP %>% mutate_each(funs(tolower), one_of(chr.cols))
+
+# Installer - reducing factor levels
+finalWP$installer <- as.factor(finalWP$installer)
+finalWP$installer[finalWP$installer == "" | finalWP$installer == 0 | finalWP$installer == "-"] <- NA
+finalWP$installer[finalWP$installer == "gove" | finalWP$installer == "gover" | finalWP$installer == "central government" | finalWP$installer == "central govt"] <- "government"
+finalWP$installer[finalWP$installer == "commu"] <- "community"
+finalWP$installer[finalWP$installer == "danid"] <- "danida"
+finalWP$installer[finalWP$installer == "word" | finalWP$installer == "wo" | finalWP$installer == "word bank" | finalWP$installer == "world" | finalWP$installer == "wordl bank" | finalWP$installer == "would bank" | finalWP$installer == "world banks" | finalWP$installer == "world nk"] <- "world bank"
+
+levels_installer = 11
+
+installerNames <- names(summary(finalWP$installer)[1:levels_installer])
+installer <- factor(finalWP$installer, levels=c(installerNames, "Other"))
+installer[is.na(installer)] <- "Other"
+finalWP$installer <- installer
+
+# Funder - reduce factor levels
+finalWP$funder <- as.factor(finalWP$funder)
+finalWP$funder[finalWP$funder == "" | finalWP$funder == 0] <- NA
+
+levels_funder = 16
+
+funderNames <- names(summary(finalWP$funder)[1:levels_funder])
+funder <- factor(finalWP$funder, levels=c(funderNames, "Other"))
+funder[is.na(funder)] <- "Other"
+finalWP$funder <- funder
+
+# Imputing missing/incorrect latitudes & longitudes
+
+finalWP$longitude[finalWP$lga =="Bariadi" & finalWP$longitude == 0] <- 34.33104
+finalWP$latitude[finalWP$lga =="Bariadi" & finalWP$latitude == -0.00000002] <- -2.69166
+
+finalWP$longitude[finalWP$lga =="Geita" & finalWP$longitude == 0] <- 32.23135
+finalWP$latitude[finalWP$lga =="Geita" & finalWP$latitude == -0.00000002] <- -2.88504
+
+finalWP$longitude[finalWP$lga =="Magu" & finalWP$longitude == 0] <- 33.25879
+finalWP$latitude[finalWP$lga =="Magu" & finalWP$latitude == -0.00000002] <- -2.45705
+
+# Setting missing values to False
+finalWP$public_meeting <- ifelse(finalWP$public_meeting == "TRUE", "True", "False")
+finalWP$public_meeting <- as.factor(finalWP$public_meeting)
+finalWP$public_meeting[is.na(finalWP$public_meeting)] <- "False"
+
+finalWP$permit <- ifelse(finalWP$permit == "TRUE", "True", "False")
+finalWP$permit <- as.factor(finalWP$permit)
+finalWP$permit[is.na(finalWP$permit)] <- "False"
+
+```
+
+# 3. Feature Selection
+
+Unneccesary, non-interpretable, constant or unclear features are removed. Feature importance and selection will be handled by random forest in the modeling section.
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, comment=FALSE}
+
+# Removing redundant features
+finalWP <- finalWP[, -which(names(finalWP) == "recorded_by")] # only one value (organization which recorded the information)
+finalWP <- finalWP[, -which(names(finalWP) == "quantity_group")] # same as quantity
+finalWP <- finalWP[, -which(names(finalWP) == "region_code")] # code for region
+finalWP <- finalWP[, -which(names(finalWP) == "date_recorded")] # Date row was entered (not a factor determining functionality)
+finalWP <- finalWP[, -which(names(finalWP) == "num_private")] #undefined,id field
+finalWP <- finalWP[, -which(names(finalWP) == "district_code")]
+finalWP <- finalWP[, -which(names(finalWP) == "quality_group")] #identical to water_quality
+finalWP <- finalWP[, -which(names(finalWP) == "payment_type")] # similar to payment
+finalWP <- finalWP[, -which(names(finalWP) == "scheme_management")] #similar to management
+finalWP <- finalWP[, -which(names(finalWP) == "management_group")] #similar to management
+finalWP <- finalWP[, -which(names(finalWP) == "source")] #similiar to source_type
+finalWP <- finalWP[, -which(names(finalWP) == "subvillage")] #too many levels
+finalWP <- finalWP[, -which(names(finalWP) == "wpt_name")] #too many levels
+finalWP <- finalWP[, -which(names(finalWP) == "ward")]
+finalWP <- finalWP[, -which(names(finalWP) == "lga")]
+finalWP <- finalWP[, -which(names(finalWP) == "scheme_name")]
+finalWP <- finalWP[, -which(names(finalWP) == "extraction_type")]
+finalWP <- finalWP[, -which(names(finalWP) == "extraction_type_group")]
+finalWP <- finalWP[, -which(names(finalWP) == "waterpoint_type_group")]
+finalWP <- finalWP[, -which(names(finalWP) == "amount_tsh")]
+
+```
+
+# 4. Modeling Section
+
+Using tuneRF function the optimal value 'mtry = 4' to use in a random forest algorithm is computed.
+
+A model using Boosing trees algorithm gives a higher test error rate than Random forests.
+
+```{r}
+
+# train/test split
+set.seed(1234)
+sample <- sample.split(finalWP$status_group, SplitRatio = .7)
+train <- subset(finalWP, sample == TRUE)
+test <- subset(finalWP, sample == FALSE)
+
+# Commented for notebook efficiency:
+# Tuning Randomforest for optimal mtry parameter
+#rf.all.tune <- tuneRF(finalWP[,-19], finalWP[,19], ntreeTry=800, stepFactor=1.5)
+
+# Randomforest 2
+set.seed(12345)
+rf.all2 <- randomForest(status_group ~ .-id, mtry=4,ntree = 350,data=train,importance=TRUE)
+
+varImpPlot(rf.all2)
+
+yhat.rf2 <- predict(rf.all2 ,newdata=test,type = "response")
+
+confusionMatrix(test$status_group,yhat.rf2)
+
+```
+
+
+
+
+```{r, include=FALSE}
+evaluate <- function(filePath = file.choose()){
+  DF  <- fread(filePath,na.strings = '',stringsAsFactors = T) # Read Values file
+  evaluationtest <- tbl_df(DF)
+  # Removing NAs from dataset
+  attach(evaluationtest)
+  
+  # Converting date to datetime class
+  evaluationtest$date_recorded <- as.Date(evaluationtest$date_recorded)
+  
+  # Creating new feature from recorded date
+  evaluationtest$days_since_last_recorded <- max(evaluationtest$date_recorded)-evaluationtest$date_recorded
+  evaluationtest$days_since_last_recorded <- as.integer(evaluationtest$days_since_last_recorded)
+  
+  # Selecting features with missing values for imputation
+  imputation <- select(evaluationtest,id,population,construction_year)
+  imputation$population[imputation$population == 0] <- NA
+  imputation$construction_year[imputation$construction_year == 0]<- NA
+  
+  # Performing mice imputation, based on random forests
+  miceMod <- mice(imputation[, !names(imputation) %in% "id"], method="rf")
+  
+  # Generating the completed data
+  miceOutput <- complete(miceMod)
+  
+  # Adding imputed values to dataset
+  evaluationtest <- select(evaluationtest,-c(population,construction_year))
+  evaluationtest <- cbind(evaluationtest,miceOutput)
+  
+  # Converting funder & installer to lowercase
+  evaluationtest$funder <- as.character(evaluationtest$funder)
+  evaluationtest$installer <- as.character(evaluationtest$installer)
+  chr.cols = evaluationtest %>% summarise_each(funs(is.character(.))) %>% unlist() %>% which() %>% names()
+  evaluationtest = evaluationtest %>% mutate_each(funs(tolower), one_of(chr.cols))
+  
+  # Installer - reducing factor levels
+  evaluationtest$installer <- as.factor(evaluationtest$installer)
+  evaluationtest$installer[evaluationtest$installer == "" | evaluationtest$installer == 0 | evaluationtest$installer == "-"] <- NA
+  evaluationtest$installer[evaluationtest$installer == "gove" | evaluationtest$installer == "gover" | evaluationtest$installer == "central government" | evaluationtest$installer == "central govt"] <- "government"
+  evaluationtest$installer[evaluationtest$installer == "commu"] <- "community"
+  evaluationtest$installer[evaluationtest$installer == "danid"] <- "danida"
+  evaluationtest$installer[evaluationtest$installer == "word" | evaluationtest$installer == "wo" | evaluationtest$installer == "word bank" | evaluationtest$installer == "world" | evaluationtest$installer == "wordl bank" | evaluationtest$installer == "would bank" | evaluationtest$installer == "world banks" | evaluationtest$installer == "world nk"] <- "world bank"
+  
+  installerNames2 <- levels(finalWP$installer)
+  installer <- factor(evaluationtest$installer, levels=c(installerNames2))
+  installer[is.na(installer)] <- "Other"
+  evaluationtest$installer <- installer
+  
+  # Funder - reduce factor levels
+  evaluationtest$funder <- as.factor(evaluationtest$funder)
+  evaluationtest$funder[evaluationtest$funder == "" | evaluationtest$funder == 0] <- NA
+  
+  funderNames2 <- levels(finalWP$funder)
+  funder <- factor(evaluationtest$funder, levels=c(funderNames2))
+  funder[is.na(funder)] <- "Other"
+  evaluationtest$funder <- funder
+  
+  # Imputing missing/incorrect latitudes & longitudes
+  evaluationtest$longitude[evaluationtest$lga =="Bariadi" & evaluationtest$longitude == 0] <- 34.33104
+  evaluationtest$latitude[evaluationtest$lga =="Bariadi" & evaluationtest$latitude == -0.00000002] <- -2.69166
+  
+  evaluationtest$longitude[evaluationtest$lga =="Geita" & evaluationtest$longitude == 0] <- 32.23135
+  evaluationtest$latitude[evaluationtest$lga =="Geita" & evaluationtest$latitude == -0.00000002] <- -2.88504
+  
+  evaluationtest$longitude[evaluationtest$lga =="Magu" & evaluationtest$longitude == 0] <- 33.25879
+  evaluationtest$latitude[evaluationtest$lga =="Magu" & evaluationtest$latitude == -0.00000002] <- -2.45705
+  
+  # Setting missing values to False
+  evaluationtest$public_meeting <- ifelse(evaluationtest$public_meeting == "TRUE", "True", "False")
+  evaluationtest$public_meeting <- as.factor(evaluationtest$public_meeting)
+  evaluationtest$public_meeting[is.na(evaluationtest$public_meeting)] <- "False"
+  
+  evaluationtest$permit <- ifelse(evaluationtest$permit == "TRUE", "True", "False")
+  evaluationtest$permit <- as.factor(evaluationtest$permit)
+  evaluationtest$permit[is.na(evaluationtest$permit)] <- "False"
+  
+  # Removing redundant features
+  evaluationtest <- evaluationtest[, -which(names(evaluationtest) == "recorded_by")] # only one value (organization which recorded the information)
+  evaluationtest <- evaluationtest[, -which(names(evaluationtest) == "quantity_group")] # same as quantity
+  evaluationtest <- evaluationtest[, -which(names(evaluationtest) == "region_code")] # code for region
+  evaluationtest <- evaluationtest[, -which(names(evaluationtest) == "date_recorded")] # Date row was entered (not a factor determining functionality)
+  evaluationtest <- evaluationtest[, -which(names(evaluationtest) == "num_private")] #undefined,id field
+  evaluationtest <- evaluationtest[, -which(names(evaluationtest) == "district_code")]
+  evaluationtest <- evaluationtest[, -which(names(evaluationtest) == "quality_group")] #identical to water_quality
+  evaluationtest <- evaluationtest[, -which(names(evaluationtest) == "payment_type")] # similar to payment
+  evaluationtest <- evaluationtest[, -which(names(evaluationtest) == "scheme_management")] #similar to management
+  evaluationtest <- evaluationtest[, -which(names(evaluationtest) == "management_group")] #similar to management
+  evaluationtest <- evaluationtest[, -which(names(evaluationtest) == "source")] #similiar to source_type
+  evaluationtest <- evaluationtest[, -which(names(evaluationtest) == "subvillage")] #too many levels
+  evaluationtest <- evaluationtest[, -which(names(evaluationtest) == "wpt_name")] #too many levels
+  evaluationtest <- evaluationtest[, -which(names(evaluationtest) == "ward")]
+  evaluationtest <- evaluationtest[, -which(names(evaluationtest) == "lga")]
+  evaluationtest <- evaluationtest[, -which(names(evaluationtest) == "scheme_name")]
+  evaluationtest <- evaluationtest[, -which(names(evaluationtest) == "extraction_type")]
+  evaluationtest <- evaluationtest[, -which(names(evaluationtest) == "extraction_type_group")]
+  evaluationtest <- evaluationtest[, -which(names(evaluationtest) == "waterpoint_type_group")]
+  evaluationtest <- evaluationtest[, -which(names(evaluationtest) == "amount_tsh")]
+  
+  yhat.rffinal <- predict(rf.all2 ,newdata=evaluationtest,type = "response")
+  submission <<- as.data.frame(yhat.rffinal)
+  submission <<- cbind(DF$id, submission)
+  names(submission) <- c('id','status_group')
+  submission$status_group <- as.factor(submission$status_group)
+  submission
+}
+
+```
+

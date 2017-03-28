@@ -16,8 +16,10 @@ output:
 
 # 1. Introduction and data preparation
 
-```{r message=FALSE}
+```{r message=FALSE, warning=FALSE}
 library(randomForest)
+library(caret)
+library(dplyr)
 ```
 
 Read and map csv files to single data frame
@@ -31,6 +33,7 @@ rm(df_labels) # remove not used data frame
 rm(df_values) # remove not used data frame
 
 # first look at the data and it's structure
+###???remove
 summary(df) 
 str(df)
 
@@ -39,6 +42,8 @@ str(df)
 It can be observed, that there are various variables that miss a significant amount of fields. Here we handle this part.
 
 ```{r}
+
+
 
 #population '0' values
 
@@ -69,7 +74,6 @@ splitdf <- function(dataframe, seed=NULL, percentage=0.8) {
 }
 
 evaluation <- function(model, split){
-  model <- tree(status_group~., data = split$trainset, family = "binomial")
   probs <- predict(model, type="response", newdata = split$testset)
   predictions <- data.frame(Survived = split$testset$Survived, pred=probs)
   myROC <- roc(Survived ~ probs, predictions)
@@ -90,6 +94,15 @@ https://github.com/drivendataorg/pump-it-up/blob/master/madRid/PumpItUp_DataDriv
 
 
 ```{r}
+
+# Installer - reduce factor levels
+all_WP$installer <- as.factor(all_WP$installer)
+all_WP$installer[all_WP$installer == "" | all_WP$installer == 0] <- NA
+all_WP$installer[all_WP$installer == "gove" | all_WP$installer == "gover" | all_WP$installer == "central government" | all_WP$installer == "central govt"] <- "government"
+all_WP$installer[all_WP$installer == "commu"] <- "community"
+all_WP$installer[all_WP$installer == "danid"] <- "danida"
+all_WP$installer[all_WP$installer == "word" | all_WP$installer == "wo" | all_WP$installer == "word bank" | all_WP$installer == "world" | all_WP$installer == "wordl bank" | all_WP$installer == "would bank" | all_WP$installer == "world banks" | all_WP$installer == "world nk"] <- "world bank"
+
 
 ```
 
@@ -112,8 +125,19 @@ featureselection <- function(df, split){
 Build modeling or model selection part
 
 ```{r}
-df1 <- lapply(df, ifelse(is.integer()))
-model1 <- randomForest(status_group ~ ., data = df, importance = TRUE, proximity = TRUE)
+
+##For testing purposes:
+df2 <- data.frame(lapply(df, function(x) as.numeric(as.character(x))))
+df2 <- data.frame(lapply(df2, function(x) as.numeric((x))))
+df2$status_group <- as.factor(df$status_group)
+
+
+split1 <- splitdf(df2)
+
+model1 <- randomForest(status_group ~ ., mtry = 6, data = split1$trainset, importance = TRUE, ntree = 500)
+
+final_model <- c("Model", "Error Rate", "Classification Rate")
+final_eval$model <- model1 
 
 ```
 
