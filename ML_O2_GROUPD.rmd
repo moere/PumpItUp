@@ -1,0 +1,297 @@
+---
+title: "Machine Learning II - MBD16 - Competition"
+output:
+  html_document: default
+  html_notebook: default
+---
+
+#Instructions
+
+
+#Table of content
+
+1. Introduction and data preparation ???Take out feature engineering
+3. Exploration ??? add plots
+3. Feature Engineering ??? add data preparation part
+4. Feature Selection
+5. Model Selection ??? add to text different models and explain why we chose RF mtry=4
+                    ??? take out tuneRF -> describe in text mtry= 3 & 4
+6. Evaluating Models ??? evaluation function
+
+# 1. Introduction and data preparation
+
+```{r message=FALSE, warning=FALSE}
+library(data.table) # Data reading
+library(mice) # imputing
+library(plyr) # Data manipulation
+library(dplyr) # Data manipulation
+library(ggplot2) # Data visualization
+library(caTools) # Split dataset
+library(randomForest) # Modeling
+library(caret) # Confusion matrix
+library(gbm) # Modeling
+
+```
+
+Read and map csv files to a single data frame
+
+```{r Setup, message=FALSE, warning=FALSE, include=FALSE}
+
+wp_values <- fread("internal-training-values.csv",na.strings = '',stringsAsFactors = T) # Read Values file
+wp_labels <- fread("internal-training-labels.csv",na.strings = '',stringsAsFactors = T) # Read Label file
+waterPump <- tbl_df(merge(wp_values,wp_labels)) # Merge both files on 'ID'
+rm(wp_labels) # remove not used data frame
+rm(wp_values) # remove not used data frame
+
+
+
+
+
+# Removing NAs from dataset
+finalWP <- waterPump[complete.cases(waterPump),]
+attach(finalWP)
+
+```
+
+It can be observed, that there are various variables that miss a significant amount of fields. Here we handle this part.
+
+```{r}
+
+
+
+
+# Selecting features with missing values for imputation
+impWP <- select(finalWP,id,population,construction_year)
+impWP$population[impWP$population == 0] <- NA
+impWP$construction_year[impWP$construction_year == 0]<- NA
+
+# Performing mice imputation, based on random forests
+miceMod <- mice(impWP[, !names(impWP) %in% "id"], method="rf")
+
+# Generating the completed data
+miceOutput <- complete(miceMod)
+
+# Adding imputed values to dataset
+finalWP <- select(finalWP,-c(population,construction_year))
+finalWP <- cbind(finalWP,miceOutput)
+
+# Converting funder & installer to lowercase
+finalWP$funder <- as.character(finalWP$funder)
+finalWP$installer <- as.character(finalWP$installer)
+chr.cols = finalWP %>% summarise_each(funs(is.character(.))) %>% unlist() %>% which() %>% names()
+finalWP = finalWP %>% mutate_each(funs(tolower), one_of(chr.cols))
+
+# Installer - reducing factor levels
+finalWP$installer <- as.factor(finalWP$installer)
+finalWP$installer[finalWP$installer == "" | finalWP$installer == 0 | finalWP$installer == "-"] <- NA
+finalWP$installer[finalWP$installer == "gove" | finalWP$installer == "gover" | finalWP$installer == "central government" | finalWP$installer == "central govt"] <- "government"
+finalWP$installer[finalWP$installer == "commu"] <- "community"
+finalWP$installer[finalWP$installer == "danid"] <- "danida"
+finalWP$installer[finalWP$installer == "word" | finalWP$installer == "wo" | finalWP$installer == "word bank" | finalWP$installer == "world" | finalWP$installer == "wordl bank" | finalWP$installer == "would bank" | finalWP$installer == "world banks" | finalWP$installer == "world nk"] <- "world bank"
+
+levels_installer = 11
+
+installerNames <- names(summary(finalWP$installer)[1:levels_installer])
+installer <- factor(finalWP$installer, levels=c(installerNames, "Other"))
+installer[is.na(installer)] <- "Other"
+finalWP$installer <- installer
+
+# Funder - reduce factor levels
+finalWP$funder <- as.factor(finalWP$funder)
+finalWP$funder[finalWP$funder == "" | finalWP$funder == 0] <- NA
+
+levels_funder = 16
+
+funderNames <- names(summary(finalWP$funder)[1:levels_funder])
+funder <- factor(finalWP$funder, levels=c(funderNames, "Other"))
+funder[is.na(funder)] <- "Other"
+finalWP$funder <- funder
+
+# Imputing missing/incorrect latitudes & longitudes
+hist(finalWP$longitude)
+nrow(finalWP[finalWP$longitude==0,])
+
+summary(finalWP$latitude)
+hist(finalWP$latitude)
+
+finalWP$longitude[finalWP$lga =="Bariadi" & finalWP$longitude == 0] <- 34.33104
+finalWP$latitude[finalWP$lga =="Bariadi" & finalWP$latitude == -0.00000002] <- -2.69166
+
+finalWP$longitude[finalWP$lga =="Geita" & finalWP$longitude == 0] <- 32.23135
+finalWP$latitude[finalWP$lga =="Geita" & finalWP$latitude == -0.00000002] <- -2.88504
+
+finalWP$longitude[finalWP$lga =="Magu" & finalWP$longitude == 0] <- 33.25879
+finalWP$latitude[finalWP$lga =="Magu" & finalWP$latitude == -0.00000002] <- -2.45705
+
+# Setting missing values to False
+finalWP$public_meeting <- ifelse(finalWP$public_meeting == "TRUE", "True", "False")
+finalWP$public_meeting <- as.factor(finalWP$public_meeting)
+finalWP$public_meeting[is.na(finalWP$public_meeting)] <- "False"
+
+finalWP$permit <- ifelse(finalWP$permit == "TRUE", "True", "False")
+finalWP$permit <- as.factor(finalWP$permit)
+finalWP$permit[is.na(finalWP$permit)] <- "False"
+
+```
+
+# 2. Exploring the data
+
+Before starting engineering the features, the dataset is explored.
+
+```{r}
+# first look at the data and it's structure
+attach(waterPump)
+summary(waterPump)
+str(waterPump)
+
+# Distribution of classes to be predicted
+table(status_group)
+prop.table(table(status_group))
+
+# Visualization of data
+qplot(quantity, data=waterPump, geom="bar", fill=status_group) + 
+  theme(legend.position = "right")
+qplot(status_group, data=waterPump, geom="bar", fill=quantity) + 
+  theme(legend.position = "right")
+
+qplot(quality_group, data=waterPump, geom="bar", fill=status_group) + 
+  theme(legend.position = "right")
+
+qplot(waterpoint_type, data=waterPump, geom="bar", fill=status_group) + 
+  theme(legend.position = "right") + 
+  theme(axis.text.x=element_text(angle = -20, hjust = 0))
+
+ggplot(subset(waterPump, construction_year > 0), aes(x =construction_year)) +
+  geom_histogram(bins = 20) + 
+  facet_grid( ~ status_group)
+
+ggplot(subset(waterPump, latitude < 0 & longitude > 0),aes(x = latitude, y = longitude, color = status_group)) + geom_point(shape = 1) + theme(legend.position = "top")
+
+
+```
+
+??? plots help to visualize and select variables for model
+
+# 4. Feature Engineering
+
+Build extra features
+
+
+```{r}
+
+# Converting date to datetime class
+finalWP$date_recorded <- as.Date(finalWP$date_recorded)
+
+# Creating new feature from recorded date
+finalWP$days_since_last_recorded <- max(finalWP$date_recorded)-finalWP$date_recorded
+finalWP$days_since_last_recorded <- as.integer(finalWP$days_since_last_recorded)
+
+```
+
+# 5. Feature Selection
+
+Build feature selection part, randomforrest
+
+```{r}
+
+# Removing redundant features
+finalWP <- finalWP[, -which(names(finalWP) == "recorded_by")] # only one value (organization which recorded the information)
+finalWP <- finalWP[, -which(names(finalWP) == "quantity_group")] # same as quantity
+finalWP <- finalWP[, -which(names(finalWP) == "region_code")] # code for region
+finalWP <- finalWP[, -which(names(finalWP) == "date_recorded")] # Date row was entered (not a factor determining functionality)
+finalWP <- finalWP[, -which(names(finalWP) == "num_private")] #undefined,id field
+finalWP <- finalWP[, -which(names(finalWP) == "district_code")]
+finalWP <- finalWP[, -which(names(finalWP) == "quality_group")] #identical to water_quality
+finalWP <- finalWP[, -which(names(finalWP) == "payment_type")] # similar to payment
+finalWP <- finalWP[, -which(names(finalWP) == "scheme_management")] #similar to management
+finalWP <- finalWP[, -which(names(finalWP) == "management_group")] #similar to management
+finalWP <- finalWP[, -which(names(finalWP) == "source")] #similiar to source_type
+finalWP <- finalWP[, -which(names(finalWP) == "subvillage")] #too many levels
+finalWP <- finalWP[, -which(names(finalWP) == "wpt_name")] #too many levels
+finalWP <- finalWP[, -which(names(finalWP) == "ward")]
+finalWP <- finalWP[, -which(names(finalWP) == "lga")]
+finalWP <- finalWP[, -which(names(finalWP) == "scheme_name")]
+finalWP <- finalWP[, -which(names(finalWP) == "extraction_type")]
+finalWP <- finalWP[, -which(names(finalWP) == "extraction_type_group")]
+finalWP <- finalWP[, -which(names(finalWP) == "waterpoint_type_group")]
+finalWP <- finalWP[, -which(names(finalWP) == "amount_tsh")]
+
+```
+
+# 6. Modeling Section
+
+Build modeling or model selection part
+
+???tuneRF -> 3 & 4 mtry, gbm: best mtry=3, here it is:
+
+```{r}
+
+# train/test split
+set.seed(1234)
+sample <- sample.split(finalWP$status_group, SplitRatio = .70)
+train <- subset(finalWP, sample == TRUE)
+test <- subset(finalWP, sample == FALSE)
+
+# Tuning Randomforest for optimal mtry parameter
+#rf.all.tune <- tuneRF(finalWP[,-19], finalWP[,19], ntreeTry=800, stepFactor=1.5)
+
+# Randomforest 1
+set.seed(12345)
+rf.all <- randomForest(status_group ~ .-id, mtry=3,ntree = 800,data=train,importance=TRUE)
+rf.all
+importance(rf.all)
+varImpPlot(rf.all)
+
+yhat.rf <- predict(rf.all ,newdata=test,type = "response")
+
+table(test$status_group,yhat.rf)
+prop.table(table(test$status_group,yhat.rf))
+confusionMatrix(test$status_group,yhat.rf)
+
+# Randomforest 2
+set.seed(12345)
+rf.all2 <- randomForest(status_group ~ .-id, mtry=4,ntree = 800,data=train,importance=TRUE)
+rf.all2
+importance(rf.all2)
+varImpPlot(rf.all2)
+
+yhat.rf2 <- predict(rf.all2 ,newdata=test,type = "response")
+
+table(test$status_group,yhat.rf2)
+prop.table(table(test$status_group,yhat.rf2))
+confusionMatrix(test$status_group,yhat.rf2)
+
+# RandomForest with mtry = 3 gives a slightly lower test error rate compared to the one with mtry = 4
+
+# Boosting
+set.seed(12345)
+#boost.wp <- gbm(status_group ~ .-id,data=train,distribution = "multinomial",n.trees=5000,interaction.depth=4,shrinkage = 0.01)
+summary(boost.wp)
+
+yhat.boost <- predict.gbm(boost.wp ,newdata = test, n.trees =5000,type = "response")
+
+pboost <- apply(yhat.boost,1,which.max)
+pboost2 <- as.factor(colnames(yhat.boost)[pboost])
+table(test$status_group,pboost2)
+prop.table(table(test$status_group,pboost2))
+
+confusionMatrix(test$status_group,pboost2)
+
+
+# Boosted Model gives a higher test error rate than Random forests
+
+
+```
+
+# 7. Model Evaluation and Model Selection
+
+Store models and evaluations
+
+```{r}
+
+evaluation <- function(filepath){
+  
+}
+
+```
+
